@@ -20,7 +20,11 @@ public class OfflineEncryptor extends JavaPlugin {
     public void onEnable() {
         plugin = this;
         if (Bukkit.getOnlineMode()) {
-            throw new IllegalStateException("Encryption is already enabled in online mode!");
+            if (LimitedOfflineModeCompat.isPresent()) {
+                getLogger().info("LimitedOfflineMode detected – running in compatibility mode");
+            } else {
+                throw new IllegalStateException("Encryption is already enabled in online mode!");
+            }
         }
         if (Bukkit.getServerConfig().isProxyEnabled()) {
             throw new IllegalStateException("This plugin doesn't work behind the proxy server, please install this in proxy instead!");
