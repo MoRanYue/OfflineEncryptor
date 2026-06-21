@@ -16,8 +16,8 @@ import io.netty.channel.ChannelHandlerContext;
 import java.security.KeyPair;
 import java.security.MessageDigest;
 import java.util.Arrays;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ThreadLocalRandom;
-import java.util.concurrent.TimeUnit;
 
 import static com.velocitypowered.proxy.crypto.EncryptionUtils.decryptRsa;
 import static io.github.lumine1909.offlineencryptor.velocity.OfflineEncryptor.plugin;
@@ -88,20 +88,27 @@ public class VelocityPacketInterceptor extends PacketInterceptor<HandshakePacket
 
     @Override
     protected void processC2SResponse(ChannelHandlerContext ctx, EncryptionResponsePacket packet) {
-        try {
-            KeyPair serverKeyPair = plugin.getServer().getServerKeyPair();
-            byte[] decryptedVerifyToken = decryptRsa(serverKeyPair, packet.getVerifyToken());
-            if (!MessageDigest.isEqual(verify, decryptedVerifyToken)) {
-                throw new IllegalStateException("Unable to successfully decrypt the verification token.");
+        // Offload CPU-heavy RSA decryption to a common ForkJoinPool
+        CompletableFuture.supplyAsync(() -> {
+            try {
+                KeyPair serverKeyPair = plugin.getServer().getServerKeyPair();
+                byte[] decryptedVerifyToken = decryptRsa(serverKeyPair, packet.getVerifyToken());
+                if (!MessageDigest.isEqual(verify, decryptedVerifyToken)) {
+                    throw new IllegalStateException("Unable to successfully decrypt the verification token.");
+                }
+                return decryptRsa(serverKeyPair, packet.getSharedSecret());
+            } catch (Exception e) {
+                throw new IllegalStateException("Protocol error", e);
             }
-            byte[] decryptedSharedSecret = decryptRsa(serverKeyPair, packet.getSharedSecret());
-            connection.enableEncryption(decryptedSharedSecret);
-            channel.eventLoop().schedule(() -> {
-                ctx.fireChannelRead(processor.getCache().remove(username));
-                processor.uninject(channel);
-            }, 500, TimeUnit.MILLISECONDS); // Let you know you are using encryption :)
-        } catch (Exception e) {
-            throw new IllegalStateException("Protocol error", e);
-        }
+        }).thenAcceptAsync(decryptedSharedSecret -> {
+            // Back on the event loop — enable encryption and forward cached hello
+            try {
+                connection.enableEncryption(decryptedSharedSecret);
+            } catch (Exception e) {
+                throw new IllegalStateException("Protocol error", e);
+            }
+            ctx.fireChannelRead(processor.getCache().remove(username));
+            processor.uninject(channel);
+        }, channel.eventLoop());
     }
 }

@@ -19,7 +19,7 @@ import org.bukkit.Bukkit;
 
 import javax.crypto.SecretKey;
 import java.security.PrivateKey;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 
 public class PaperPacketInterceptor extends PacketInterceptor<ClientIntentionPacket, ServerboundHelloPacket, ServerboundKeyPacket> {
@@ -86,19 +86,27 @@ public class PaperPacketInterceptor extends PacketInterceptor<ClientIntentionPac
     @Override
     protected void processC2SResponse(ChannelHandlerContext ctx, ServerboundKeyPacket packet) {
         ServerLoginPacketListenerImpl login = (ServerLoginPacketListenerImpl) connection.getPacketListener();
-        try {
-            PrivateKey privateKey = server.getKeyPair().getPrivate();
-            if (!packet.isChallengeValid(field$challenge.get(login), privateKey)) {
-                throw new IllegalStateException("Protocol error");
+        // Offload CPU-heavy RSA decryption to a common ForkJoinPool
+        // to avoid blocking the Netty event loop.
+        CompletableFuture.supplyAsync(() -> {
+            try {
+                PrivateKey privateKey = server.getKeyPair().getPrivate();
+                if (!packet.isChallengeValid(field$challenge.get(login), privateKey)) {
+                    throw new IllegalStateException("Protocol error");
+                }
+                return packet.getSecretKey(privateKey);
+            } catch (CryptException e) {
+                throw new IllegalStateException("Protocol error", e);
             }
-            SecretKey secretKey = packet.getSecretKey(privateKey);
-            this.connection.setEncryptionKey(secretKey);
-            channel.eventLoop().schedule(() -> {
-                ctx.fireChannelRead(processor.getCache().remove(username));
-                processor.uninject(channel);
-            }, 500, TimeUnit.MILLISECONDS); // Let you know you are using encryption :)
-        } catch (CryptException e) {
-            throw new IllegalStateException("Protocol error", e);
-        }
+        }).thenAcceptAsync(secretKey -> {
+            // Back on the event loop — set encryption and forward cached hello
+            try {
+                this.connection.setEncryptionKey(secretKey);
+            } catch (CryptException e) {
+                throw new IllegalStateException("Protocol error", e);
+            }
+            ctx.fireChannelRead(processor.getCache().remove(username));
+            processor.uninject(channel);
+        }, channel.eventLoop());
     }
 }
