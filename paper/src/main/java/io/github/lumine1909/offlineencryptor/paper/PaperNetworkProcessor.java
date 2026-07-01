@@ -7,10 +7,7 @@ import net.minecraft.network.protocol.login.ServerboundHelloPacket;
 public class PaperNetworkProcessor extends NetworkProcessor<ServerboundHelloPacket> {
 
     public void inject(Channel channel) {
-        // When LimitedOfflineMode is active, ensure our handler is placed BEFORE
-        // LOM's handler so that we can intercept the login start packet first.
-        // This prevents LOM from marking pendingUsername before we send our
-        // encryption request – which would cause LOM to swallow it.
+        // Thank you LimitedOfflineMode
         if (channel.pipeline().get("lom_login_interceptor") != null) {
             channel.pipeline().addBefore("lom_login_interceptor", "oe_handler", new PaperPacketInterceptor(channel, this));
         } else {
