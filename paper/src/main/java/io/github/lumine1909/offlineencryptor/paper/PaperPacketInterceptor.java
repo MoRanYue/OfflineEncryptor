@@ -19,6 +19,7 @@ import net.minecraft.util.CryptException;
 import javax.crypto.SecretKey;
 import java.security.PrivateKey;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
 public class PaperPacketInterceptor extends PacketInterceptor<ClientIntentionPacket, ServerboundHelloPacket, ServerboundKeyPacket> {
@@ -79,6 +80,7 @@ public class PaperPacketInterceptor extends PacketInterceptor<ClientIntentionPac
     @Override
     protected void processC2SResponse(ChannelHandlerContext ctx, ServerboundKeyPacket packet) {
         ServerLoginPacketListenerImpl login = (ServerLoginPacketListenerImpl) connection.getPacketListener();
+        String playerName = username;
         // Offload CPU-heavy RSA decryption to a common ForkJoinPool
         // to avoid blocking the Netty event loop.
         CompletableFuture.supplyAsync(() -> {
@@ -98,8 +100,13 @@ public class PaperPacketInterceptor extends PacketInterceptor<ClientIntentionPac
             } catch (CryptException e) {
                 throw new IllegalStateException("Protocol error", e);
             }
-            ctx.fireChannelRead(processor.getCache().remove(username));
-            processor.uninject(channel);
+            OfflineEncryptor.plugin.getLogger().info("Encrypted offline player connection for " + playerName);
+            // Small delay so the client can display the encryption notice
+            // before the login completes
+            channel.eventLoop().schedule(() -> {
+                ctx.fireChannelRead(processor.getCache().remove(playerName));
+                processor.uninject(channel);
+            }, 500, TimeUnit.MILLISECONDS);
         }, channel.eventLoop());
     }
 }
