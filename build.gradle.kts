@@ -33,7 +33,8 @@ tasks {
 
         duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 
-        subprojects.forEach { sub ->
+        val included = subprojects.filter { it.name != "velocity" }
+        included.forEach { sub ->
             dependsOn(sub.tasks.jar)
             from(sub.tasks.jar.flatMap { it.archiveFile }.map { zipTree(it) })
         }

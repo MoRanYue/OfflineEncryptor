@@ -54,12 +54,6 @@ public class PaperPacketInterceptor extends PacketInterceptor<ClientIntentionPac
                     super.channelRead(ctx, msg);
                     return;
                 }
-                if (LimitedOfflineModeCompat.isPresent() && !LimitedOfflineModeCompat.isUserAllowed(packet.name())) {
-                    processor.uninject(channel);
-                    enabled = false;
-                    super.channelRead(ctx, msg);
-                    return;
-                }
                 processC2SHello(ctx, packet);
             }
             case ServerboundKeyPacket packet -> processC2SResponse(ctx, packet);
